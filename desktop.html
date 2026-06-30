@@ -309,6 +309,17 @@
       flex-wrap: wrap;
       gap: 8px;
     }
+    .sheet-settings {
+      display: grid;
+      gap: 10px;
+      width: 100%;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--surface-soft) 72%, var(--surface));
+    }
+    .sheet-settings .grid {
+      grid-template-columns: minmax(240px, 1fr) minmax(140px, 220px);
+    }
     .warning {
       display: none;
       margin: 0 0 14px;
@@ -665,6 +676,23 @@
             </div>
             <div class="small">コピーは既存シートA〜M列へ貼れるTSVです。</div>
           </div>
+          <div class="sheet-settings">
+            <div class="grid">
+              <label>
+                Apps Script URL
+                <input id="sheetWebhookUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
+              </label>
+              <label>
+                合言葉
+                <input id="sheetWebhookToken" type="password" autocomplete="off">
+              </label>
+            </div>
+            <div class="copy-actions">
+              <button id="sendSelected" type="button">選択行をシート転記</button>
+              <button id="sendUseful" class="secondary" type="button">OK+慎重をシート転記</button>
+              <button id="sendVisible" class="neutral" type="button">表示中をシート転記</button>
+            </div>
+          </div>
           <div class="compact-note">スマホでは主要列を優先表示しています。横スクロールで詳細も確認できます。</div>
           <div class="table-wrap">
             <table class="combo-table">
@@ -715,7 +743,9 @@
       "otherCost",
       "targetProfit",
       "minMargin",
-      "minRoi"
+      "minRoi",
+      "sheetWebhookUrl",
+      "sheetWebhookToken"
     ];
     const state = {
       limits: [],
@@ -1021,6 +1051,24 @@
       ].join("\t");
     }
 
+    function rowToSheetValues(row) {
+      return [
+        row.itemName,
+        row.salePrice,
+        row.costPrice,
+        Number(percentForCopy(row.feeRate)),
+        row.shipping,
+        row.packing,
+        row.otherCost,
+        row.targetProfit,
+        row.fee,
+        row.profit,
+        Number(percentForCopy(row.margin)),
+        row.limit,
+        row.decision
+      ];
+    }
+
     async function copyRows(rows) {
       $("manualCopy").classList.remove("show");
       if (!rows.length) {
@@ -1037,6 +1085,37 @@
         $("manualCopyText").focus();
         $("manualCopyText").select();
         setStatus("自動コピーできませんでした。手動コピー欄を表示しました");
+      }
+    }
+
+    async function sendRows(rows) {
+      if (!rows.length) {
+        setStatus("転記対象がありません");
+        return;
+      }
+      const url = $("sheetWebhookUrl").value.trim();
+      const token = $("sheetWebhookToken").value;
+      if (!url || !token) {
+        setStatus("Apps Script URLと合言葉を入力してください");
+        return;
+      }
+      const payload = {
+        token,
+        source: "brand-profit-simulator",
+        sentAt: new Date().toISOString(),
+        rows: rows.map(rowToSheetValues)
+      };
+      try {
+        await fetch(url, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify(payload)
+        });
+        saveSettings();
+        setStatus(`${rows.length}行を利益計算シートへ転記しました`);
+      } catch {
+        setStatus("シート転記に失敗しました。Apps Script URLを確認してください");
       }
     }
 
@@ -1095,6 +1174,9 @@
       $("copyOk").addEventListener("click", () => copyRows(state.rows.filter((row) => row.decision === "OK")));
       $("copyUseful").addEventListener("click", () => copyRows(state.rows.filter((row) => row.decision === "OK" || row.decision === "慎重")));
       $("copyVisible").addEventListener("click", () => copyRows(state.visibleRows));
+      $("sendSelected").addEventListener("click", () => sendRows(state.rows.filter((row) => state.selected.has(row.id))));
+      $("sendUseful").addEventListener("click", () => sendRows(state.rows.filter((row) => row.decision === "OK" || row.decision === "慎重")));
+      $("sendVisible").addEventListener("click", () => sendRows(state.visibleRows));
     }
 
     loadSettings();
